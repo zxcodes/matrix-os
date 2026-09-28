@@ -82,7 +82,7 @@ export function fakeDirectWorld() {
     if (url.origin === PLATFORM) {
       if (url.pathname === "/api/collaboration/connections" && method === "POST") {
         const parsed = JSON.parse(body) as Json;
-        if (platform.offlineScopes.has(parsed.scopeId as string)) return json({ error: "Collaboration unavailable" }, 503);
+        if (platform.offlineScopes.has(parsed.scopeId as string)) return json({ error: "host_offline", code: "host_offline" }, 503);
         return json(issue(parsed), 201);
       }
       if (url.pathname === "/api/collaboration/inbox") return json({ items: platform.inbox });
@@ -144,4 +144,3 @@ export function fakeDirectWorld() {
   };
   return { home, platform, fetchImpl, webSocketFactory, sockets, now, advance, verifyTicket };
 }
-

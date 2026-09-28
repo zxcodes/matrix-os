@@ -1,7 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCollaborationBrowserApi } from "../../packages/ui/src/collaboration/client.js";
+import { classifyCollaborationClientError } from "../../packages/ui/src/collaboration/failure-classification.js";
 
 describe("collaboration browser client", () => {
+  it("preserves only a bounded stable platform failure code for recipient copy", async () => {
+    const api = createCollaborationBrowserApi({
+      baseUrl: "https://app.matrix-os.com",
+      fetchImpl: async () => new Response(JSON.stringify({ error: "postgres://secret", code: "host_offline" }),
+        { status: 503, headers: { "content-type": "application/json" } }),
+    });
+    const error = await api.get("/api/collaboration/shared").catch((failure: unknown) => failure);
+    expect(classifyCollaborationClientError(error)).toMatchObject({ state: "host_offline", reconnect: true });
+    expect(String(error)).not.toContain("postgres://secret");
+  });
+
+  it("does not reconnect a legacy event subscriber after an upgrade-required response", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ error: "Update required", code: "upgrade_required" }),
+        { status: 426, headers: { "content-type": "application/json" } }));
+      const api = createCollaborationBrowserApi({ baseUrl: "https://app.matrix-os.com", fetchImpl,
+        webSocketFactory: () => { throw new Error("socket should not open"); } });
+      const unavailable = vi.fn();
+      const stop = api.subscribe!("10000000-0000-4000-8000-000000000001", vi.fn(), unavailable);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({ state: "upgrade_required", reconnect: false }));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      stop();
+    } finally { vi.useRealTimers(); }
+  });
   it("uses exact bounded requests and caller-provided actor authentication", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: { "content-type": "application/json", "content-length": "11" },
