@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn, execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ChatRunContextSchema } from "@matrix-os/contracts";
 import { createHermesChatProviderAdapter } from "../../packages/gateway/src/chat/hermes-provider-adapter.js";
 import { createHermesStdioClient } from "../../packages/gateway/src/chat/hermes-stdio-client.js";
+import { createJevHermesCredentialResolver } from "../../packages/gateway/src/chat/jev-hermes-credentials.js";
+import { normalizeHermesRuntimeSnapshot } from "../../packages/gateway/src/agent-config/hermes-source.js";
+import { jevReadySettingsSnapshot } from "../fixtures/jev-inbox.js";
 import { baseInput, fakeGateway } from "./hermes-test-gateway.js";
 import type { CanonicalProviderRunEvent } from "../../packages/gateway/src/chat/provider-adapter.js";
 const context = ChatRunContextSchema.parse({ version: 1, requestHash: "a".repeat(64), chats: [], agent: {
@@ -28,6 +31,51 @@ function fixture() {
   return { gateway, adapter, resolveCredentials, verifyRuntime, preflight, clearRun, summary };
 }
 describe("production isolated Hermes recipe launch", () => {
+  it.each(["openai-api", "openrouter", "openai-codex"])("launches projected %s credentials through the selected session and sole-broker gate", async provider => {
+    const home = await mkdtemp(join(tmpdir(), "jev-projected-launch-"));
+    const time = Date.now();
+    const model = provider === "openrouter" ? "anthropic/claude-sonnet-5" : "gpt-5.6-sol";
+    const accessToken = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(time / 1000) + 3600,
+      "https://api.openai.com/auth": { chatgpt_account_id: "synthetic-owner" } })).toString("base64url"), "fixture"].join(".");
+    const key = provider === "openai-codex" ? accessToken : `synthetic-${provider}`;
+    await mkdir(join(home, ".hermes"));
+    await writeFile(join(home, ".hermes/config.yaml"), JSON.stringify({ model: { provider, default: model },
+      shell_hooks: { command: "must-not-copy" } }));
+    await writeFile(join(home, ".hermes/.env"), `OPENAI_API_KEY=synthetic-openai-api\nOPENROUTER_API_KEY=synthetic-openrouter\n`);
+    await writeFile(join(home, ".hermes/auth.json"), JSON.stringify({ providers: { "openai-codex": {
+      tokens: { access_token: accessToken, refresh_token: "must-not-copy-refresh" } } } }));
+    const runtimeSource = async () => normalizeHermesRuntimeSnapshot({ observedAt: Date.now(),
+      status: { version: "0.21.4", gateway_running: true }, options: { provider, model,
+        providers: [{ slug: provider, auth_type: provider === "openai-codex" ? "oauth" : "api_key", authenticated: true, models: [model] }] } });
+    const resolveCredentials = createJevHermesCredentialResolver({ homePath: home, ownerId: input.owner.ownerId,
+      settings: { getSnapshot: async () => jevReadySettingsSnapshot(Date.now()) }, runtimeSource });
+    const gateway = fakeGateway(); const preflight = vi.fn(async () => undefined);
+    const adapter = createHermesChatProviderAdapter({ homePath: home, spawnFn: gateway.spawnFn,
+      jev: { resolveCredentials, verifyRuntime: async () => undefined, preflight, clearRun: vi.fn(), summary: () => null } });
+    try {
+      const result = collect(adapter.start({ ...input, selection: { instanceId: "hermes_default", model: `${provider}:${model}` } }));
+      await vi.waitFor(() => expect(gateway.requests.some(request => request.method === "session.create")).toBe(true));
+      expect(gateway.requests.find(request => request.method === "session.create")?.params).toMatchObject({ provider, model });
+      const launch = gateway.spawnFn.mock.calls[0]![2];
+      expect(launch.env.MATRIX_JEV_PRIMARY_KEY).toBe(key);
+      expect(launch.env.MATRIX_JEV_PRIMARY_PROVIDER).toBe(provider);
+      expect(launch.env.MATRIX_JEV_PRIMARY_MODEL).toBe(model);
+      expect(launch.env.MATRIX_JEV_PRIMARY_MODE).toBe(provider === "openrouter" ? "chat_completions" : "codex_responses");
+      expect(launch.env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(JSON.stringify(launch.env)).not.toContain("must-not-copy");
+      const config = JSON.parse(await readFile(join(launch.env.HERMES_HOME!, "config.yaml"), "utf8"));
+      expect(config.fallback_providers).toEqual([]); expect(config.model.provider).toBe(provider);
+      expect(Object.keys(config.mcp_servers)).toEqual(["matrix_jev_recipe"]);
+      expect(gateway.requests.some(request => request.method === "prompt.submit")).toBe(false);
+      gateway.event("session.info", { provider, model, lazy: false,
+        tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
+      await vi.waitFor(() => expect(gateway.requests.some(request => request.method === "prompt.submit")).toBe(true));
+      expect(preflight).toHaveBeenCalledOnce();
+      gateway.event("message.complete", { text: "Read-only proposal", status: "complete" });
+      expect(await result).toContainEqual({ type: "run.completed", outcome: "completed" });
+      await expect(access(launch.cwd)).rejects.toThrow();
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
   it.each(["sitecustomize.py", "usercustomize.py", "startup.pth", "cached-bytecode", "benign-cache"])("native credential-bearing startup cannot execute unchecked %s", async hook => {
     const directory = await mkdtemp(join(tmpdir(), "jev-native-startup-"));
     const root = join(directory, ".hermes/hermes-agent"); const marker = join(directory, "startup-marker");

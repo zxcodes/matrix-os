@@ -88,6 +88,28 @@ describe("Chat Agent HTTP boundary", () => {
     expect((await app.request(`/api/chat-agents/${created.id}`, json("PATCH", { baseRevision: created.revision, selection }))).status).toBe(400);
   });
 
+  it("cannot save an unsupported Jev selection while archiving or reactivate a legacy unsupported selection", async () => {
+    const recipe = { skills: ["matrix-jev-email-triage", "matrix-integrations"],
+      integrations: [{ service: "gmail", accountLabel: "My Gmail" }], output: "Read-only proposals" };
+    const created = await (await app.request("/api/chat-agents", json("POST", { ...fields, recipe }))).json();
+    const codex = catalog.instances.find(instance => instance.driverKind === "codex")!;
+    const selection = { instanceId: codex.id, model: codex.models[0]!.id };
+    expect((await app.request(`/api/chat-agents/${created.id}`, json("PATCH", {
+      baseRevision: created.revision, archived: true, selection,
+    }))).status).toBe(400);
+    // Simulate an archived record from before this boundary existed.
+    const legacy = await agents.update(owner, created.id, { baseRevision: created.revision, archived: true, selection });
+    expect((await app.request(`/api/chat-agents/${created.id}`, json("PATCH", {
+      baseRevision: legacy.revision, archived: false,
+    }))).status).toBe(400);
+    expect((await agents.get(owner, created.id))?.archived).toBe(true);
+    const repaired = await app.request(`/api/chat-agents/${created.id}`, json("PATCH", {
+      baseRevision: legacy.revision, archived: false, selection: fields.selection,
+    }));
+    expect(repaired.status).toBe(200);
+    expect((await repaired.json()).archived).toBe(false);
+  });
+
   it("stamps owner, exact label, connection ID and expected email on Jev creation", async () => {
     const recipe = { skills: ["matrix-jev-email-triage", "matrix-integrations"],
       integrations: [{ service: "gmail", accountLabel: "My Gmail" }], output: "Review proposed labels" };
