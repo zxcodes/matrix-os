@@ -61,7 +61,7 @@ const IssuedOwnerRuntimeTicketSchema = z.object({
 
 export type CollaborationDirectErrorCode =
   | "upgrade_required" | "host_offline" | "denied" | "unavailable" | "not_found" | "invalid_request" | "invalid_response"
-  | "access_removed" | "relay_limit" | "forbidden" | "resource_missing" | "paused";
+  | "access_removed" | "relay_limit" | "forbidden" | "unauthorized" | "resource_missing" | "paused";
 
 /** Safe, generic client error: never carries provider, host or path detail. */
 export class CollaborationDirectError extends Error {
@@ -72,7 +72,7 @@ export class CollaborationDirectError extends Error {
 }
 
 export type DirectScopeState = "idle" | "connecting" | "connected" | "offline" | "upgrade_required" | "denied"
-  | "unavailable" | "access_removed" | "relay_limit" | "forbidden" | "resource_missing" | "paused";
+  | "unavailable" | "access_removed" | "relay_limit" | "forbidden" | "unauthorized" | "resource_missing" | "paused";
 export type DirectMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface DirectDeleteConditions { clientRequestId: string; expectedRevision: string; expectedMemberRevision: string }
 
@@ -153,6 +153,8 @@ export function createCollaborationDirectClient(options: CollaborationDirectClie
 
   /** Platform: `POST /api/collaboration/connections`. The wire code distinguishes owner-home liveness from lost access. */
   const issueTicket = async (scopeId: string, purpose: "direct_session" | "events" | "terminal", key: ProofKeyPair) => {
+    const current = purpose === "direct_session" ? scopes.get(scopeId) : null;
+    const generation = current?.generation;
     const response = await guardedFetch(fetchImpl, new URL("/api/collaboration/connections", platform).href, {
       method: "POST",
       headers: await platformHeaders(),
@@ -164,8 +166,8 @@ export function createCollaborationDirectClient(options: CollaborationDirectClie
     try {
       await throwForResponse(response);
     } catch (error: unknown) {
-      const entry = scopes.get(scopeId);
-      if (entry && error instanceof CollaborationDirectError) entry.state = directScopeFailureState(error.code);
+      if (current && scopes.get(scopeId) === current && current.generation === generation && current.key === key
+        && error instanceof CollaborationDirectError) current.state = directScopeFailureState(error.code);
       throw error;
     }
     const raw = await readJson(response);
@@ -288,7 +290,8 @@ export function createCollaborationDirectClient(options: CollaborationDirectClie
           } catch (error: unknown) {
             if (!active()) throw closedError();
             if (error instanceof CollaborationDirectError && (error.code === "upgrade_required" || error.code === "host_offline"
-              || error.code === "access_removed" || error.code === "relay_limit" || error.code === "forbidden")) throw error;
+              || error.code === "access_removed" || error.code === "relay_limit" || error.code === "forbidden"
+              || error.code === "unauthorized")) throw error;
           }
         }
         if (!active()) throw closedError();
@@ -534,7 +537,7 @@ async function guardedFetch(fetchImpl: typeof fetch, url: string, init: RequestI
 
 function directScopeFailureState(code: CollaborationDirectErrorCode): DirectScopeState {
   if (code === "host_offline") return "offline";
-  if (["upgrade_required", "access_removed", "relay_limit", "forbidden", "resource_missing", "paused", "unavailable", "denied"].includes(code)) {
+  if (["upgrade_required", "access_removed", "relay_limit", "forbidden", "unauthorized", "resource_missing", "paused", "unavailable", "denied"].includes(code)) {
     return code as DirectScopeState;
   }
   return "idle";
@@ -555,7 +558,7 @@ async function throwForResponse(response: Response): Promise<void> {
       throw new CollaborationDirectError(classified.state, classified.message, classified.retryAfterSeconds);
     }
   }
-  if (response.status === 404) throw new CollaborationDirectError("access_removed", "This item is no longer shared with you");
+  if (response.status === 404) throw new CollaborationDirectError("unavailable");
   if (response.status === 426) throw new CollaborationDirectError("upgrade_required", "Collaboration client update required");
   if (response.status === 401 || response.status === 403) throw new CollaborationDirectError("denied", "Collaboration request denied");
   if (response.status === 409 || response.status === 413 || response.status === 422) throw new CollaborationDirectError("invalid_request", "Collaboration state changed");
