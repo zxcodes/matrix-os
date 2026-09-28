@@ -187,18 +187,24 @@ export function normalizeHermesRuntimeSnapshot(input: {
     && selectedProvider?.models.some((model) => model.id === currentModel) === true;
   const configured = currentProvider !== null && currentModel !== null && hasSelection;
   const version = VersionSchema.safeParse(status.version);
-  // Legacy authKind defaults to OAuth for display compatibility. Exact source
-  // evidence requires a unique raw provider with an explicit credential origin.
+  // The pinned SDK omits auth_type from model options for built-in providers.
+  // Recognize only its explicit non-user-defined records for supported routes;
+  // the Inbox resolver independently checks the exact default-profile files.
   const selectedNativeRecords = options.providers.filter((raw) =>
     typeof raw === "object" && raw !== null && "slug" in raw
       && typeof raw.slug === "string" && raw.slug.trim() === currentProvider);
   const nativeParsed = selectedNativeRecords.length === 1
     ? HermesProviderSchema.safeParse(selectedNativeRecords[0]) : undefined;
   const nativeProvider = nativeParsed?.success ? nativeParsed.data : undefined;
+  const builtInCredentialKind = nativeProvider?.is_user_defined === false
+    && nativeProvider.auth_type === undefined
+    ? currentProvider === "openai-codex" ? "provider_profile" as const
+      : currentProvider === "openai-api" || currentProvider === "openrouter" ? "api_key" as const : undefined
+    : undefined;
   const nativeCredentialKind = nativeProvider?.is_user_defined === true ? "custom" as const
     : nativeProvider?.auth_type === "oauth" ? "provider_profile" as const
     : nativeProvider?.auth_type === "api_key" ? "api_key" as const
-      : nativeProvider?.auth_type === "base_url" || nativeProvider?.auth_type === "custom" ? "custom" as const : undefined;
+      : nativeProvider?.auth_type === "base_url" || nativeProvider?.auth_type === "custom" ? "custom" as const : builtInCredentialKind;
 
   return {
     runtime: {

@@ -46,7 +46,7 @@ describe("production isolated Hermes recipe launch", () => {
       tokens: { access_token: accessToken, refresh_token: "must-not-copy-refresh" } } } }));
     const runtimeSource = async () => normalizeHermesRuntimeSnapshot({ observedAt: Date.now(),
       status: { version: "0.21.4", gateway_running: true }, options: { provider, model,
-        providers: [{ slug: provider, auth_type: provider === "openai-codex" ? "oauth" : "api_key", authenticated: true, models: [model] }] } });
+        providers: [{ slug: provider, is_user_defined: false, authenticated: true, models: [model] }] } });
     const resolveCredentials = createJevHermesCredentialResolver({ homePath: home, ownerId: input.owner.ownerId,
       settings: { getSnapshot: async () => jevReadySettingsSnapshot(Date.now()) }, runtimeSource });
     const gateway = fakeGateway(); const preflight = vi.fn(async () => undefined);
