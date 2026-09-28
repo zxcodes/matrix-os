@@ -322,7 +322,7 @@ export function createHermesChatProviderAdapter(options: {
     if (input.interactionMode !== "default") throw new Error("Unsupported Hermes interaction mode");
     const selected = selection(input.selection.model);
     const jevScope = jevScopeForRun(input.owner.ownerId, input.runId, input.context);
-    const catalogGate = jevScope ? createJevHermesCatalogGate() : undefined;
+    const catalogGate = jevScope ? createJevHermesCatalogGate(selected) : undefined;
     if (jevScope && !options.jev) throw new Error("Restricted Inbox setup required");
     // Isolated recipe runs never resume an owner-profile native checkpoint.
     if (jevScope) resumeState = undefined;

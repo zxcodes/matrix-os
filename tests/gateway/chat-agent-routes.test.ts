@@ -19,7 +19,7 @@ import { createCanonicalProviderCatalogFixture } from "../contracts/fixtures/can
 const owner = { type: "personal" as const, ownerId: "owner_agent_routes" };
 const fields = {
   clientRequestId: "req_route_agent", name: "Meeting helper", description: "Prepare a meeting",
-  instructions: "Summarize decisions and questions.", selection: { instanceId: "hermes_default", model: "openai:gpt-5.6-sol" },
+  instructions: "Summarize decisions and questions.", selection: { instanceId: "hermes_default", model: "openai-api:gpt-5.6-sol" },
 };
 
 describe("Chat Agent HTTP boundary", () => {
@@ -60,6 +60,7 @@ describe("Chat Agent HTTP boundary", () => {
     catalog = createCanonicalProviderCatalogFixture();
     catalog.drivers.push({ ...catalog.drivers[0]!, kind: "hermes", displayName: "Hermes" });
     catalog.instances.push({ ...catalog.instances[0]!, id: "hermes_default", driverKind: "hermes",
+      defaultSelection: fields.selection,
       models: [{ ...catalog.instances[0]!.models[0]!, id: fields.selection.model }],
       supports: { ...catalog.instances[0]!.supports, permissionModes: ["full_access"] },
     });
@@ -77,6 +78,15 @@ describe("Chat Agent HTTP boundary", () => {
     await agents.close(); await repository.kysely.destroy(); await rm(home, { recursive: true, force: true });
   });
   const json = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  it("rejects a Jev recipe on a Codex harness at create and selection-only edit", async () => {
+    const recipe = { skills: ["matrix-jev-email-triage", "matrix-integrations"],
+      integrations: [{ service: "gmail", accountLabel: "My Gmail" }], output: "Read-only proposals" };
+    const codex = catalog.instances.find(instance => instance.driverKind === "codex")!;
+    const selection = { instanceId: codex.id, model: codex.models[0]!.id };
+    expect((await app.request("/api/chat-agents", json("POST", { ...fields, recipe, selection }))).status).toBe(400);
+    const created = await (await app.request("/api/chat-agents", json("POST", { ...fields, recipe }))).json();
+    expect((await app.request(`/api/chat-agents/${created.id}`, json("PATCH", { baseRevision: created.revision, selection }))).status).toBe(400);
+  });
 
   it("stamps owner, exact label, connection ID and expected email on Jev creation", async () => {
     const recipe = { skills: ["matrix-jev-email-triage", "matrix-integrations"],

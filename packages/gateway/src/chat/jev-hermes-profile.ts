@@ -23,7 +23,7 @@ export async function createJevHermesProfile(credentials: JevHermesCredentials, 
     const hermesHome = join(homePath, "hermes");
     await mkdir(hermesHome, { mode: 0o700 });
     const config = { model: { default: credentials.model, provider: credentials.provider, base_url: credentials.baseUrl,
-      api_mode: credentials.apiMode, context_length: 128000 }, agent: { max_turns: 12 },
+      api_mode: credentials.apiMode, context_length: 128000 }, agent: { max_turns: 12 }, fallback_providers: [],
       auxiliary: { background_review: { enabled: false }, title_generation: { enabled: false } },
       memory: { memory_enabled: false, user_profile_enabled: false }, tools: { tool_search: false },
       mcp_servers: { matrix_jev_recipe: { command: "/opt/matrix/bin/matrix-integrations-mcp",
@@ -35,7 +35,8 @@ export async function createJevHermesProfile(credentials: JevHermesCredentials, 
       PATH: "/opt/matrix/runtime/node/bin:/usr/bin:/bin", MATRIX_NODE_PREFIX: "/opt/matrix/runtime/node",
       MATRIX_AGENT_INTEGRATIONS_TOKEN: token, HERMES_TUI_TOOLSETS: "matrix_jev_recipe", HERMES_IGNORE_RULES: "1",
       HERMES_SINGLE_QUERY_SESSION: "1", HERMES_DISABLE_TELEMETRY: "1", HERMES_DISABLE_LAZY_INSTALLS: "1",
-      ...credentials.env }, async close(): Promise<void> {
+      ...credentials.env, MATRIX_JEV_PRIMARY_PROVIDER: credentials.provider, MATRIX_JEV_PRIMARY_MODEL: credentials.model,
+      MATRIX_JEV_PRIMARY_URL: credentials.baseUrl, MATRIX_JEV_PRIMARY_MODE: credentials.apiMode }, async close(): Promise<void> {
         try { await rm(ownedHome, { recursive: true, force: true }); }
         finally { active.delete(ownedHome); }
       } };
@@ -51,7 +52,7 @@ export async function createJevHermesProfile(credentials: JevHermesCredentials, 
 }
 
 /** Native catalog, not prompt guidance or allowedTools, is the pre-inference admission proof. */
-export function createJevHermesCatalogGate() {
+export function createJevHermesCatalogGate(expected?: { provider: string; model: string }) {
   let sessionId: string | undefined;
   let observed: HermesGatewayEvent | undefined;
   let settled = false;
@@ -64,7 +65,9 @@ export function createJevHermesCatalogGate() {
     const groups = parsed.success ? Object.values(parsed.data.tools) : [];
     const names = groups.flat();
     settled = true;
-    if (!parsed.success || groups.length > 16 || names.length !== 1 || names[0] !== BROKER) {
+    const route = z.object({ provider: z.string(), model: z.string() }).safeParse(observed.payload);
+    if (!parsed.success || groups.length > 16 || names.length !== 1 || names[0] !== BROKER
+      || (expected && (!route.success || route.data.provider !== expected.provider || route.data.model !== expected.model))) {
       failure = new Error("Restricted native tool catalog unavailable");
     }
     notify?.();

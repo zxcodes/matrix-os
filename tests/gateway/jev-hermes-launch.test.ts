@@ -63,7 +63,7 @@ describe("production isolated Hermes recipe launch", () => {
     if (mode !== "empty-broker") f.summary.mockReturnValue(serverSummary);
     const events = collect(f.adapter.start(input));
     await vi.waitFor(() => expect(f.gateway.requests.some(r => r.method === "session.create")).toBe(true));
-    f.gateway.event("session.info", { lazy: false, tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
+    f.gateway.event("session.info", { provider: "anthropic", model: "claude-sonnet-5", lazy: false, tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
     await vi.waitFor(() => expect(f.gateway.requests.some(r => r.method === "prompt.submit")).toBe(true));
     const name = mode === "wrong-tool" ? "forged_tool" : "mcp__matrix_jev_recipe__jev_inbox_preview";
     f.gateway.event("tool.start", { tool_id: "tool_proposal", name, args: { operation: "evaluate" } });
@@ -101,7 +101,7 @@ describe("production isolated Hermes recipe launch", () => {
       expect(launch.env.UPGRADE_TOKEN).toBeUndefined(); expect(launch.env.PYTHONPATH).toBeUndefined();
       expect(f.gateway.spawnFn.mock.calls[0]![1]).toContain("-S");
       expect(launch.env.ANTHROPIC_API_KEY).toBe(credentials.env.ANTHROPIC_API_KEY);
-      f.gateway.event("session.info", { lazy: false, tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
+      f.gateway.event("session.info", { provider: "anthropic", model: "claude-sonnet-5", lazy: false, tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
       await vi.waitFor(() => expect(f.gateway.requests.some((r) => r.method === "prompt.submit")).toBe(true));
       expect(f.preflight).toHaveBeenCalledTimes(1); expect(f.resolveCredentials).toHaveBeenCalledWith(input.owner.ownerId, input.selection, expect.any(AbortSignal));
       f.gateway.event("message.complete", { text: "Read-only proposal", status: "complete" });
@@ -117,7 +117,7 @@ describe("production isolated Hermes recipe launch", () => {
     const events = collect(f.adapter.start(input));
     if (mode === "unverified-pin") { await expect(events).rejects.toThrow(); expect(f.gateway.spawnFn).not.toHaveBeenCalled(); return; }
     await vi.waitFor(() => expect(f.gateway.requests.some((r) => r.method === "session.create")).toBe(true));
-    f.gateway.event("session.info", { lazy: false, tools: { matrix_jev_recipe: mode === "extra-tool" ? ["terminal", "mcp__matrix_jev_recipe__jev_inbox_preview"] : ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
+    f.gateway.event("session.info", { provider: "anthropic", model: "claude-sonnet-5", lazy: false, tools: { matrix_jev_recipe: mode === "extra-tool" ? ["terminal", "mcp__matrix_jev_recipe__jev_inbox_preview"] : ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
     expect(await events).toContainEqual(expect.objectContaining({ type: "run.completed", outcome: "failed" }));
     expect(f.gateway.requests.some((r) => r.method === "prompt.submit")).toBe(false);
     expect(f.clearRun).toHaveBeenCalledWith(input.owner.ownerId, input.runId);
@@ -128,7 +128,7 @@ describe("production isolated Hermes recipe launch", () => {
     const controller = new AbortController();
     const result = collect(f.adapter.start({ ...input, signal: controller.signal }));
     await vi.waitFor(() => expect(f.gateway.requests.some(request => request.method === "session.create")).toBe(true));
-    f.gateway.event("session.info", { lazy: false, tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
+    f.gateway.event("session.info", { provider: "anthropic", model: "claude-sonnet-5", lazy: false, tools: { matrix_jev_recipe: ["mcp__matrix_jev_recipe__jev_inbox_preview"] } });
     await vi.waitFor(() => expect(f.preflight).toHaveBeenCalledOnce());
     controller.abort(); finish();
     const completed = await result;
