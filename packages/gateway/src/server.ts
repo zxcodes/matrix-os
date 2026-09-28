@@ -1278,7 +1278,7 @@ export async function createGateway(config: GatewayConfig) {
     canonicalChatExecutionRoots, gatewayCollaboration,
   });
 
-  const processManager = registerDeferredRuntimeRoutes({
+  const { processManager, customMcp } = registerDeferredRuntimeRoutes({
     app, homePath, integrationRoutes, internalIntegrationBaseUrl,
     internalPlatformToken, internalPlatformUrl, internalHandle,
     proxyIntegrationRequest: (c, targetBase, machineToken, routePrefix) =>
@@ -1833,6 +1833,7 @@ export async function createGateway(config: GatewayConfig) {
       canvasSubscriptionHub?.close();
       systemActivityCandidates.clear();
       await channelManager.stop();
+      customMcp.stop();
       await processManager.shutdownAll();
       await forwardTunnelHub.close();
       await watcher.close();
