@@ -8,6 +8,7 @@ import type { JevHermesCredentials } from "./jev-hermes-credentials.js";
 const active = new Set<string | symbol>();
 const MAX_PROFILES = 128;
 const BROKER = "mcp__matrix_jev_recipe__jev_inbox_preview";
+const LazySnapshot = z.object({ lazy: z.literal(true) });
 const Catalog = z.object({ lazy: z.boolean().optional(), tools: z.record(z.string().max(128), z.array(z.string().max(256)).max(64)) });
 
 /** Exclusive per-run profile; no owner auth/config/hooks, ambient env, auxiliary inference or shell tools. */
@@ -60,8 +61,10 @@ export function createJevHermesCatalogGate(expected?: { provider: string; model:
   let notify: (() => void) | undefined;
   const inspect = () => {
     if (!observed || observed.session_id !== sessionId || settled) return;
+    // Native cwd updates can precede construction and omit tool fields.
+    // They are pending evidence, never permission to submit a prompt.
+    if (LazySnapshot.safeParse(observed.payload).success) return;
     const parsed = Catalog.safeParse(observed.payload);
-    if (parsed.success && parsed.data.lazy === true) return;
     const groups = parsed.success ? Object.values(parsed.data.tools) : [];
     const names = groups.flat();
     settled = true;
