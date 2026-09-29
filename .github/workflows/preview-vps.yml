@@ -161,13 +161,13 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.head_sha }}
 
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -250,13 +250,13 @@ jobs:
     steps:
       - name: Checkout preview source
         if: needs.gate.outputs.action == 'deploy'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.head_sha }}
 
       - name: Checkout trusted workflow helpers
         if: needs.gate.outputs.action == 'deploy_existing'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
 
@@ -611,7 +611,7 @@ jobs:
           chmod 600 preview-runtime-route.json
 
       - name: Publish exact-head preview runtime route
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: preview-runtime-access-${{ needs.gate.outputs.pr }}
           path: preview-runtime-route.json
