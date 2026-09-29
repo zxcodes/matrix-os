@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createJevHermesCredentialResolver } from "../../packages/gateway/src/chat/jev-hermes-credentials.js";
@@ -35,6 +35,20 @@ async function fixture(provider = "openai-codex", mode = "") {
   return { home, model, runtimeSource, resolve, close: () => rm(home, { recursive: true, force: true }) };
 }
 describe("Jev uses the configured native Hermes account without inheriting its profile", () => {
+  it("uses the sole OAuth pool entry created by Hermes auth add without copying its refresh grant", async () => {
+    const f = await fixture();
+    try {
+      await writeFile(join(f.home, ".hermes/auth.json"), JSON.stringify({ version: 1, providers: {},
+        active_provider: "openai-codex", credential_pool: { "openai-codex": [{
+          id: "fixture-device-login", source: "manual:device_code", auth_type: "oauth",
+          access_token: token(), refresh_token: "must-not-copy-refresh", priority: 0,
+        }] } }));
+      const value = await f.resolve("owner_fixture", { instanceId: "hermes_default", model: `openai-codex:${f.model}` });
+      expect(value.env).toEqual({ MATRIX_JEV_PRIMARY_KEY: token() });
+      expect(JSON.stringify(value)).not.toContain("must-not-copy-refresh");
+      expect(JSON.parse(await readFile(join(f.home, ".hermes/auth.json"), "utf8")).providers).toEqual({});
+    } finally { await f.close(); }
+  });
   it.each(["openai-codex", "openai-api", "openrouter"])("projects only %s's inference credential", async provider => {
     const f = await fixture(provider);
     try {
@@ -47,6 +61,20 @@ describe("Jev uses the configured native Hermes account without inheriting its p
       expect(f.runtimeSource.invalidate).toHaveBeenCalledOnce();
     } finally { await f.close(); }
   });
+  it.each(["multiple", "expired", "custom-endpoint", "wrong-provider", "unsupported-source", "missing-refresh"])(
+    "rejects a %s pool-only login instead of guessing a credential", async mode => {
+      const f = await fixture();
+      try {
+        const entry = { access_token: token(mode === "expired" ? time / 1000 - 1 : undefined),
+          refresh_token: mode === "missing-refresh" ? "" : "must-not-copy-refresh",
+          auth_type: "oauth", source: mode === "unsupported-source" ? "foreign-profile" : "manual:device_code",
+          ...(mode === "custom-endpoint" ? { base_url: "https://evil.example.test" } : {}) };
+        await writeFile(join(f.home, ".hermes/auth.json"), JSON.stringify({ providers: {},
+          active_provider: mode === "wrong-provider" ? "anthropic" : "openai-codex",
+          credential_pool: { "openai-codex": mode === "multiple" ? [entry, entry] : [entry] } }));
+        await expect(f.resolve("owner_fixture", { instanceId: "hermes_default", model: `openai-codex:${f.model}` })).rejects.toThrow();
+      } finally { await f.close(); }
+    });
   it.each(["expired", "pool", "config-model", "endpoint", "disabled", "stale", "unauthenticated", "symlink", "named-profile", "active-symlink"])(
     "rejects %s before any paid work rather than selecting another account", async mode => {
       const f = await fixture("openai-codex", mode);

@@ -14,6 +14,7 @@ import {
 import { z } from "zod/v4";
 import type { GenericHarnessModelCatalog } from "./generic-harness-model-catalog.js";
 import { generatedNativeHarnessConfiguration } from "./provider-generated-native-route.js";
+import { hermesGeneratedNativeDefault } from "./hermes-generated-native-default.js";
 import { resolveProviderSettingsDriverId } from "./provider-settings-driver-id.js";
 
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -215,7 +216,7 @@ function defaultHarnessConfiguration(
   now = new Date(),
 ): HarnessConfiguration | null {
   if (driver.installState !== "installed") return null;
-  const native = generatedNativeHarnessConfiguration(driver, genericModelCatalog, now);
+  const native = hermesGeneratedNativeDefault(driver, now) ?? generatedNativeHarnessConfiguration(driver, genericModelCatalog, now);
   if (native) return native;
   const harness = harnessKindForDriver(driver.id);
   if (harness === null) return null;
@@ -277,6 +278,14 @@ function reconcileProviderSettingsConfiguration(
   for (const driver of canonical.drivers) {
     const fallback = defaultHarnessConfiguration(driver, canonical, genericModelCatalog, now);
     const existing = config.harnesses.find((harness) => harness.driverId === driver.id);
+    if (existing?.harness === "hermes" && existing.enablementOrigin === "generated_default") {
+      const native = hermesGeneratedNativeDefault(driver, now);
+      if (native && (!existing.enabled || existing.accessSourceId !== null
+        || existing.route.providerId !== native.route.providerId || existing.route.modelId !== native.route.modelId)) {
+        Object.assign(existing, { enabled: true, selectedAccountId: null, accessSourceId: null, route: native.route });
+        changed = true;
+      }
+    }
     if (genericModelCatalog && existing?.enablementOrigin === "generated_default"
       && (existing.harness === "pi" || existing.harness === "opencode")) {
       const native = generatedNativeHarnessConfiguration(driver, genericModelCatalog, now);

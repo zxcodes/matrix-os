@@ -1,5 +1,6 @@
 import { projectHermesNativeRouteObservation } from "./hermes-native-route-observation.js";
 import { qualifyGeneratedNativeSource } from "./provider-generated-native-route.js";
+import { addHermesGeneratedNativeModel } from "./hermes-generated-native-default.js";
 import {
   ProviderSettingsSnapshotSchema,
   isLocallyObservedNativeHarnessRoute,
@@ -487,6 +488,8 @@ export async function projectProviderSettings(input: {
     failures: failedCatalogs,
     canonicalProviderIds,
   });
+  addHermesGeneratedNativeModel({ providers: modelProviders,
+    driver: input.canonical.drivers.find(d => d.id === "hermes"), harnesses: input.config.harnesses, now: input.now });
   modelProviders.sort((left, right) => left.displayName.localeCompare(right.displayName));
   const gatewayPolicy = input.config.gatewayPolicy
     && sources.some((source) => source.id === input.config.gatewayPolicy?.accessSourceId && source.kind === "matrix_gateway")

@@ -69,14 +69,25 @@ function envKey(text: string, name: string): string {
 function codexKey(text: string, now: number): string {
   const auth = z.object({ providers: z.object({ "openai-codex": z.object({
     tokens: z.object({ access_token: Key, refresh_token: Key }),
-  }).passthrough() }).passthrough(), credential_pool: z.record(z.string(), z.array(z.unknown()).max(128)).optional() }).passthrough().parse(JSON.parse(text));
-  const key = auth.providers["openai-codex"].tokens.access_token;
+  }).passthrough().optional() }).passthrough(),
+  active_provider: z.string().optional(),
+  credential_pool: z.record(z.string(), z.array(z.unknown()).max(128)).optional() }).passthrough().parse(JSON.parse(text));
+  const pool = auth.credential_pool?.["openai-codex"] ?? [];
+  const singleton = auth.providers["openai-codex"]?.tokens.access_token;
+  // The pinned CLI's `auth add` writes the default profile's credential pool.
+  // Admit one explicit device login only; never reproduce account rotation.
+  const entry = singleton === undefined && pool.length === 1
+    ? z.object({ access_token: Key, refresh_token: Key, auth_type: z.literal("oauth"),
+      source: z.literal("manual:device_code"),
+      base_url: z.enum(["", endpoints["openai-codex"].url]).nullable().optional(),
+    }).passthrough().parse(pool[0]) : undefined;
+  const key = singleton ?? entry?.access_token;
+  if (!key || (auth.active_provider && auth.active_provider !== "openai-codex")) throw denied();
   const claims = z.object({ exp: z.number().finite(), "https://api.openai.com/auth": z.object({
     chatgpt_account_id: z.string().min(1).max(256),
   }).passthrough() }).passthrough().parse(JSON.parse(Buffer.from(key.split(".")[1] ?? "", "base64url").toString("utf8")));
   // Fresh access grant only. The isolated child never receives a rotating refresh grant.
   if (claims.exp * 1000 <= now + 120_000) throw denied();
-  const pool = auth.credential_pool?.["openai-codex"] ?? [];
   if (pool.some(entry => !z.object({ access_token: z.literal(key) }).passthrough().safeParse(entry).success)) throw denied();
   return key;
 }
